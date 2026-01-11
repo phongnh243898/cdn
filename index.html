@@ -139,6 +139,17 @@
       orthoCam.up.set(0,1,0);
       orthoCam.position.set(0,0,50);
 
+      // Trục tọa độ tham chiếu
+      const axes = new THREE.AxesHelper(5);
+      axes.renderOrder = 1500;
+      axes.traverse(obj => {
+        if (obj.material) {
+          obj.material.depthTest = false;
+          obj.material.depthWrite = false;
+        }
+      });
+      scene.add(axes);
+
       let camera = persCam, controls = new OrbitControls(camera, renderer.domElement), points = null;
       const poly = new PolygonManager(scene, renderer);
       poly.setCategories(CATEGORY_LIST);
@@ -182,7 +193,7 @@
           controls.dispose();
 
           if(is2D) {
-              camera = orthoCam;
+              camera = orthoCam; // Bắt buộc dùng OrthographicCamera cho PlaneOXY
               orthoCam.position.copy(target).add(new THREE.Vector3(0,0,50));
               orthoCam.lookAt(target);
               orthoCam.zoom = lastZoom;
@@ -240,7 +251,7 @@
       function apply() {
           if(!points) return;
           const is2D = document.getElementById('oxy').checked;
-          setupControls(is2D);
+          setupControls(is2D); // đảm bảo PlaneOXY luôn ở OrthographicCamera
           poly.setFlatten(is2D);
           const fType = document.getElementById('fType').value;
           updatePCDShader(THREE, points, {
