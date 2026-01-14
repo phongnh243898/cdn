@@ -130,6 +130,8 @@
       if (!render3d) { console.error('Element #render3d not found'); return; }
 
       const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setClearColor(0x2b2b2b, 1);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
       render3d.appendChild(renderer.domElement);
 
       const scene = new THREE.Scene();
