@@ -86,7 +86,7 @@ export function updatePCDShader(THREE, pcdMesh, state) {
         `,
         vertexColors: true,
         depthTest: true,
-        depthWrite: false,
-        transparent: true
+        depthWrite: true,
+        transparent: false
     });
 }
