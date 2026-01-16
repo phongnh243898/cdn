@@ -18,7 +18,7 @@ export class PolygonManager {
         this.raycaster.params.Line = { threshold: 0.15 };
         this.selected = null;
         this.categoryList = [...DEFAULT_CATEGORY_LIST];
-        this.flatten = false; 
+        this.flatten = false;
     }
 
     setFlatten(flag) {
@@ -29,7 +29,19 @@ export class PolygonManager {
         });
     }
 
-    get defaultCategoryId() { return this.categoryList[0]?.id; }
+    setCategories(list = []) {
+        if (Array.isArray(list) && list.length) {
+            this.categoryList = list.map(c => ({
+                id: c.id,
+                name: c.name,
+                color: (DEFAULT_CATEGORY_LIST.find(d => d.id === c.id)?.color) ?? 0xff0000
+            }));
+            this.polygons.forEach(p => this.updateHandleStyles(p));
+        }
+    }
+
+    get defaultCategoryId() { return this.categoryList[0]?.id ?? DEFAULT_CATEGORY_LIST[0].id; }
+    get categories() { return this.categoryList; }
 
     start() {
         this.isDrawing = true;
@@ -43,19 +55,24 @@ export class PolygonManager {
         if (!this.isDrawing || event.button !== 0 || !this.current) return;
         const pos = this.getMousePos(event, camera);
         if (pos) {
-            const p = pos.clone();
-            this.current.points.push(p);
-            this.createHandle(this.current, p);
+            const clone = pos.clone();
+            this.current.points.push(clone);
+            this.createHandle(this.current, clone);
             this.redraw(this.current, false);
         }
     }
 
     createHandle(poly, pos) {
-        const geo = new THREE.SphereGeometry(0.2, 16, 12);
-        const mat = new THREE.MeshBasicMaterial({ color: this.getCategoryColor(poly.categoryId), depthTest: false, transparent: true, opacity: 0.8 });
+        const geo = new THREE.SphereGeometry(0.12, 16, 12);
+        const mat = new THREE.MeshBasicMaterial({
+            color: this.getCategoryColor(poly.categoryId),
+            depthTest: false,
+            depthWrite: false,
+            transparent: true
+        });
         const handle = new THREE.Mesh(geo, mat);
-        handle.position.set(pos.x, pos.y, this.flatten ? 0.1 : (pos.z || 0.1));
-        handle.renderOrder = 3000;
+        handle.position.set(pos.x, pos.y, this.flatten ? 0.1 : (pos.z ?? 0.1));
+        handle.renderOrder = 2000;
         this.scene.add(handle);
         poly.handles.push(handle);
         this.updateHandleVisibility();
@@ -64,9 +81,9 @@ export class PolygonManager {
     updateHandleStyles(poly) {
         const color = this.getCategoryColor(poly.categoryId);
         poly.handles.forEach((h, idx) => {
-            if (h.material) h.material.color.set(color);
+            if (h.material?.color) h.material.color.set(color);
             const p = poly.points[idx];
-            h.position.set(p.x, p.y, this.flatten ? 0.1 : (p.z || 0.1));
+            if (p) h.position.set(p.x, p.y, this.flatten ? 0.1 : (p.z ?? 0.1));
         });
     }
 
@@ -85,12 +102,13 @@ export class PolygonManager {
         );
         this.raycaster.setFromCamera(mouse, camera);
         const target = new THREE.Vector3();
-        // Giao với mặt phẳng Z=0
-        const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
-        return this.raycaster.ray.intersectPlane(plane, target) ? target : null;
+        return this.raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 0, 1), 0), target) ? target : null;
     }
 
-    handlePointerDown(event, camera) {
+    getAllHandles() { return this.polygons.flatMap(p => p.handles); }
+    getAllLines() { return this.polygons.map(p => p.line).filter(Boolean); }
+
+    handlePointerDown(event, camera, { allowSelect = true, allowDrag = true } = {}) {
         const rect = this.renderer.domElement.getBoundingClientRect();
         const mouse = new THREE.Vector2(
             ((event.clientX - rect.left) / rect.width) * 2 - 1,
@@ -98,26 +116,42 @@ export class PolygonManager {
         );
         this.raycaster.setFromCamera(mouse, camera);
 
-        const allHandles = this.polygons.flatMap(p => p.handles);
-        const hits = this.raycaster.intersectObjects(allHandles);
-        if (hits.length > 0) {
-            const handle = hits[0].object;
+        const handleHits = this.raycaster.intersectObjects(this.getAllHandles(), false);
+        if (handleHits.length) {
+            const handle = handleHits[0].object;
             const poly = this.polygons.find(p => p.handles.includes(handle));
-            this.select(poly);
-            this.draggedHandle = handle;
-            this.draggedPoly = poly;
-            return { action: 'drag' };
+            if (poly) {
+                const wasSelected = this.selected === poly;
+                if (!wasSelected && allowSelect) this.select(poly);
+                if (wasSelected && allowDrag) {
+                    this.draggedHandle = handle;
+                    this.draggedPoly = poly;
+                    return { action: 'drag-start' };
+                }
+                if (wasSelected || allowSelect) return { action: 'selected' };
+            }
+        }
+
+        const lineHits = this.raycaster.intersectObjects(this.getAllLines(), false);
+        if (lineHits.length) {
+            const line = lineHits[0].object;
+            const poly = this.polygons.find(p => p.line === line);
+            if (poly) {
+                const wasSelected = this.selected === poly;
+                if (!wasSelected && allowSelect) this.select(poly);
+                if (wasSelected || allowSelect) return { action: 'selected' };
+            }
         }
         return null;
     }
 
     onDrag(event, camera) {
-        if (!this.draggedHandle) return;
+        if (!this.draggedHandle || !this.draggedPoly) return;
         const pos = this.getMousePos(event, camera);
         if (pos) {
-            const idx = this.draggedPoly.handles.indexOf(this.draggedHandle);
-            this.draggedPoly.points[idx].copy(pos);
-            this.draggedHandle.position.set(pos.x, pos.y, this.flatten ? 0.1 : (pos.z || 0.1));
+            this.draggedHandle.position.set(pos.x, pos.y, this.flatten ? 0.1 : (pos.z ?? 0.1));
+            const index = this.draggedPoly.handles.indexOf(this.draggedHandle);
+            this.draggedPoly.points[index].copy(pos);
             this.redraw(this.draggedPoly, this.draggedPoly.closed);
         }
     }
@@ -125,30 +159,33 @@ export class PolygonManager {
     onDragEnd() { this.draggedHandle = null; this.draggedPoly = null; }
 
     redraw(poly, closed = false) {
+        this.updateHandleStyles(poly);
         if (poly.line) this.scene.remove(poly.line);
         if (poly.points.length < 2) return;
 
-        const pts = this.flatten ? poly.points.map(p => new THREE.Vector3(p.x, p.y, 0)) : poly.points;
+        const pts = this.flatten
+          ? poly.points.map(p => new THREE.Vector3(p.x, p.y, 0))
+          : poly.points;
+
         const geo = new THREE.BufferGeometry().setFromPoints(pts);
+        const color = this.getCategoryColor(poly.categoryId);
+        const isSelected = this.selected === poly;
         const mat = new THREE.LineBasicMaterial({
-            color: this.getCategoryColor(poly.categoryId),
-            linewidth: (this.selected === poly) ? 3 : 1,
+            color,
+            linewidth: isSelected ? 10 : 5,
             depthTest: false,
+            depthWrite: false,
             transparent: true
         });
         poly.line = closed ? new THREE.LineLoop(geo, mat) : new THREE.Line(geo, mat);
-        poly.line.renderOrder = 2900;
+        poly.line.renderOrder = isSelected ? 2001 : 1999;
         this.scene.add(poly.line);
     }
 
     finish() {
         if (this.current) {
-            if (this.current.points.length < 3) {
-                this.deleteSelected();
-            } else {
-                this.current.closed = true;
-                this.redraw(this.current, true);
-            }
+            this.current.closed = true;
+            this.redraw(this.current, true);
         }
         this.isDrawing = false;
         this.current = null;
@@ -156,62 +193,90 @@ export class PolygonManager {
     }
 
     select(poly) {
-        this.selected = poly;
+        if (this.selected === poly) return;
+        this.selected = poly || null;
         this.polygons.forEach(p => this.redraw(p, p.closed));
         this.updateHandleVisibility();
     }
 
     deleteSelected() {
         if (!this.selected) return;
-        this.selected.handles.forEach(h => this.scene.remove(h));
-        if (this.selected.line) this.scene.remove(this.selected.line);
-        this.polygons = this.polygons.filter(p => p !== this.selected);
+        const poly = this.selected;
+        poly.handles.forEach(h => this.scene.remove(h));
+        if (poly.line) this.scene.remove(poly.line);
+        this.polygons = this.polygons.filter(p => p !== poly);
         this.selected = null;
+        this.current = null;
         this.isDrawing = false;
+        this.updateHandleVisibility();
     }
 
-    getCategoryColor(id) {
-        return this.categoryList.find(c => c.id === id)?.color || 0xff0000;
-    }
-
-    cycleCategory(dir = 1) {
+    cycleCategory(direction = 1) {
         if (!this.selected) return;
         const idx = this.categoryList.findIndex(c => c.id === this.selected.categoryId);
-        const next = (idx + dir + this.categoryList.length) % this.categoryList.length;
-        this.selected.categoryId = this.categoryList[next].id;
+        if (idx === -1) this.selected.categoryId = this.defaultCategoryId;
+        else {
+            const next = (idx + direction + this.categoryList.length) % this.categoryList.length;
+            this.selected.categoryId = this.categoryList[next].id;
+        }
         this.updateHandleStyles(this.selected);
         this.redraw(this.selected, this.selected.closed);
     }
 
-    loadFromAnnotations(annotations = []) {
+    clearAll() {
         this.polygons.forEach(p => {
             p.handles.forEach(h => this.scene.remove(h));
             if (p.line) this.scene.remove(p.line);
         });
         this.polygons = [];
-        annotations.forEach(a => {
-            if (a.shape !== 'polygon') return;
+        this.current = null;
+        this.isDrawing = false;
+        this.selected = null;
+    }
+
+    getCategoryColor(id) {
+        const found = this.categoryList.find(c => c.id === id);
+        return found ? found.color : 0xff0000;
+    }
+
+    loadFromAnnotations(annotations = []) {
+        this.clearAll();
+        annotations.forEach((a) => {
+            if (!a || a.shape !== 'polygon' || !Array.isArray(a.location)) return;
+            const pts = a.location
+                .map(pt => new THREE.Vector3(pt.x, pt.y, pt.z ?? 0))
+                .filter(v => Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z));
+            if (pts.length < 3) return;
             const poly = {
-                points: a.location.map(l => new THREE.Vector3(l.x, l.y, l.z || 0)),
+                points: [],
                 handles: [],
                 line: null,
                 closed: true,
-                categoryId: a.category_id
+                categoryId: a.category_id || this.defaultCategoryId
             };
             this.polygons.push(poly);
-            poly.points.forEach(p => this.createHandle(poly, p));
+            pts.forEach(p => {
+                const clone = p.clone();
+                poly.points.push(clone);
+                this.createHandle(poly, clone);
+            });
             this.redraw(poly, true);
         });
+        this.select(this.polygons[0] || null);
+        this.updateHandleVisibility();
     }
 
     getAnnotations() {
+        const closedPolys = this.polygons.filter(p => p.closed && p.points.length >= 3);
         return {
-            annotations: this.polygons.filter(p => p.closed).map((p, i) => ({
-                id: i + 1,
+            annotations: closedPolys.map((p, idx) => ({
+                id: idx + 1,
+                type: '3D',
+                category_id: p.categoryId ?? this.defaultCategoryId,
                 shape: 'polygon',
-                category_id: p.categoryId,
-                location: p.points.map(pt => ({ x: pt.x, y: pt.y, z: pt.z }))
-            }))
+                location: p.points.map(pt => ({ x: pt.x, y: pt.y, z: pt.z ?? 0 }))
+            })),
+            categories: this.categoryList.map(c => ({ id: c.id, name: c.name }))
         };
     }
 }
