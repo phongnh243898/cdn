@@ -36,11 +36,7 @@
     /* video view */
     #videoView { position: absolute; width: 400px; height: 300px; bottom: 10px; left: 10px; border: 1px solid #555; background: #000; z-index: 2500; display: flex; align-items: center; justify-content: center; overflow: hidden; }
     #videoView video { max-width: none; max-height: none; transform-origin: center center; }
-    #videoView .resize-handle { position: absolute; width: 14px; height: 14px; background: #00aaff; cursor: nwse-resize; }
-    #videoView .resize-handle.bottom-right { right: 0; bottom: 0; cursor: nwse-resize; }
-    #videoView .resize-handle.bottom-left { left: 0; bottom: 0; cursor: swne-resize; }
-    #videoView .resize-handle.top-left { left: 0; top: 0; cursor: nwse-resize; }
-    #videoView .resize-handle.top-right { right: 0; top: 0; cursor: swne-resize; }
+    #videoView .resize-handle { position: absolute; width: 14px; height: 14px; right: 0; top: 0; background: #00aaff; cursor: nwse-resize; }
   </style>
 </head>
 <body>
@@ -64,7 +60,7 @@
           <option value="default">Default</option>
           <option value="bw">B&W</option>
           <option value="height">Height Gradient</option>
-          <option value="distance">Dist Gradient</option>
+          <option value="distance">Distance</option>
         </select>
         <div id="gradOpts" style="display:none">
           <div class="row-2">
@@ -108,23 +104,40 @@
   { 
     "imports": { 
       "three": "https://unpkg.com/three@0.161.0/build/three.module.js", 
-      "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/",
-      "./js":"https://cdn.phongnh.io.vn/js"
+      "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm",
+      "./js": "https://cdn.phongnh.io.vn/js"
     } 
   } </script>
   <script type="module">
     document.addEventListener('DOMContentLoaded', async () => {
+      // Import modules
+      const THREE = await import('three');
+      const { PCDLoader } = await import('three/addons/loaders/PCDLoader.js');
+      const { OrbitControls } = await import('three/addons/controls/OrbitControls.js');
+      const { updatePCDShader } = await import('./js/helper_shader_pcd.js');
+      const { PolygonManager } = await import('./js/helper_polygon.js');
       const { VideoManager } = await import('./js/helper_video.js');
+
+      const CATEGORY_LIST = [
+        { id: 205340, name: 'undrivable', color: '#ff0000' },
+        { id: 205341, name: 'things',      color: '#ffff00' },
+        { id: 205342, name: 'construction',color: '#800080' },
+        { id: 205343, name: 'uneven',      color: '#ffffff' },
+      ];
+
+      const render3d = document.getElementById('render3d');
+      if (!render3d) { console.error('Element #render3d not found'); return; }
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setClearColor(0xa0a0a0a0, 1);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      render3d.appendChild(renderer.domElement);
+
       const videoMgr = new VideoManager(document.body);
-
-      document.getElementById('videoFile').onchange = (e) => {
-        const file = e.target.files[0];
-        if (file) videoMgr.loadVideo(file);
+      document.getElementById('videoFile').onchange = e => {
+          const file = e.target.files[0];
+          if (file) videoMgr.loadVideo(file);
       };
-
-      videoMgr.onFocus(() => {
-        console.log('Video manager is focused.');
-      });
     });
   </script>
 </body>
