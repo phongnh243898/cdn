@@ -8,22 +8,17 @@ export class VideoManager {
         this.isPanning = false;
         this.isResizing = false;
         this.startPan = { x: 0, y: 0, ox: 0, oy: 0 };
-        this.startSize = { w: 400, h: 300, x: 0, y: 0 };
+        this.startSize = { w: 600, h: 300, x: 0, y: 0 };
         this.resizeDirection = '';
-        this.focusCb = () => {};
     }
 
-    onFocus(cb) { this.focusCb = cb || (() => {}); }
-
-    loadVideo(file, onLoaded) {
+    loadVideo(file) {
         if (!this.view) this.createView();
         const url = URL.createObjectURL(file);
         this.video.src = url;
-        this.video.onloadeddata = () => {
+        this.video.onloadedmetadata = () => {
             this.fitVideoToFrame();
             this.video.play().catch(() => {});
-            if (onLoaded) onLoaded();
-            this.focusCb();
         };
     }
 
@@ -33,12 +28,11 @@ export class VideoManager {
 
         this.video = document.createElement('video');
         this.video.controls = true;
-        this.video.style.position = 'absolute';
+        this.video.style.position = 'relative'; // Quan trọng: Để Flexbox căn giữa
         this.video.style.transformOrigin = 'center center';
         this.view.appendChild(this.video);
 
-        const directions = ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
-        directions.forEach(dir => {
+        ['top-left', 'top-right', 'bottom-left', 'bottom-right'].forEach(dir => {
             const h = document.createElement('div');
             h.className = `resize-handle ${dir}`;
             this.view.appendChild(h);
@@ -50,13 +44,12 @@ export class VideoManager {
 
     attachEvents() {
         this.view.addEventListener('mousedown', e => {
-            this.focusCb();
             if (e.target.classList.contains('resize-handle')) {
                 this.isResizing = true;
                 this.resizeDirection = e.target.classList[1];
                 this.startSize = { w: this.view.offsetWidth, h: this.view.offsetHeight, x: e.clientX, y: e.clientY };
                 e.preventDefault();
-            } else if (e.button === 2) { // Right click to pan
+            } else if (e.button === 2) { 
                 this.isPanning = true;
                 this.startPan = { x: e.clientX, y: e.clientY, ox: this.offset.x, oy: this.offset.y };
                 e.preventDefault();
@@ -65,9 +58,8 @@ export class VideoManager {
 
         this.view.addEventListener('wheel', e => {
             e.preventDefault();
-            const delta = e.deltaY < 0 ? 1.1 : 0.9;
-            this.scale *= delta;
-            this.scale = Math.min(10, Math.max(0.1, this.scale));
+            const factor = e.deltaY < 0 ? 1.1 : 0.9;
+            this.scale = Math.min(15, Math.max(0.05, this.scale * factor));
             this.applyTransform();
         }, { passive: false });
 
@@ -75,9 +67,9 @@ export class VideoManager {
             if (this.isResizing) {
                 const dx = e.clientX - this.startSize.x;
                 const dy = e.clientY - this.startSize.y;
-                if (this.resizeDirection.includes('right')) this.view.style.width = Math.max(100, this.startSize.w + dx) + 'px';
-                if (this.resizeDirection.includes('bottom')) this.view.style.height = Math.max(80, this.startSize.h + dy) + 'px';
-                // Note: top/left resize requires updating position as well, omitted for brevity but standard logic applies
+                if (this.resizeDirection.includes('right')) this.view.style.width = Math.max(150, this.startSize.w + dx) + 'px';
+                if (this.resizeDirection.includes('bottom')) this.view.style.height = Math.max(100, this.startSize.h + dy) + 'px';
+                // Khi resize container, video vẫn tự căn giữa nhờ flexbox
             }
             if (this.isPanning) {
                 this.offset.x = this.startPan.ox + (e.clientX - this.startPan.x);
@@ -96,6 +88,7 @@ export class VideoManager {
 
     applyTransform() {
         if (!this.video) return;
+        // Transform kết hợp cả Scale và Pan offset
         this.video.style.transform = `translate(${this.offset.x}px, ${this.offset.y}px) scale(${this.scale})`;
     }
 
@@ -103,14 +96,20 @@ export class VideoManager {
         if (!this.video || !this.view) return;
         const vw = this.view.clientWidth;
         const vh = this.view.clientHeight;
-        const videoAspect = this.video.videoWidth / this.video.videoHeight;
+        const videoW = this.video.videoWidth;
+        const videoH = this.video.videoHeight;
+
+        const aspect = videoW / videoH;
         const frameAspect = vw / vh;
 
-        if (videoAspect > frameAspect) {
-            this.scale = vw / this.video.videoWidth;
+        // Tính toán tỉ lệ scale ban đầu để lấp đầy khung hình mà không bị mất hình
+        if (aspect > frameAspect) {
+            this.scale = vw / videoW;
         } else {
-            this.scale = vh / this.video.videoHeight;
+            this.scale = vh / videoH;
         }
+        
+        // Reset offset về 0 (vì flexbox đã căn giữa video rồi)
         this.offset = { x: 0, y: 0 };
         this.applyTransform();
     }
