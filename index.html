@@ -144,7 +144,8 @@
 
       // 1. Scene setup
       const scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x111111);
+      // Đặt màu nền là #a2a2a2 theo yêu cầu
+      scene.background = new THREE.Color('#a2a2a2');
       
       const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
       camera.position.set(0, 0, 50);
@@ -156,7 +157,8 @@
       container.appendChild(renderer.domElement);
 
       const controls = new OrbitControls(camera, renderer.domElement);
-      controls.enableDamping = true;
+      // Tắt dư âm (Damping) theo yêu cầu - Camera dừng lập tức khi thả chuột
+      controls.enableDamping = false;
 
       // 2. Managers
       const polyMgr = new PolygonManager(scene, renderer);
@@ -185,7 +187,6 @@
           pcdMesh = points;
           scene.add(pcdMesh);
           
-          // Center camera
           pcdMesh.geometry.computeBoundingSphere();
           const center = pcdMesh.geometry.boundingSphere.center;
           controls.target.copy(center);
