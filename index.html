@@ -32,34 +32,14 @@
     label { font-size: 11px; color: #aaa; display: block; margin-bottom: 4px; }
 
     #settingBtn { position: absolute; top: 10px; right: 10px; z-index: 3000; background: #444; color: #fff; border: 1px solid #666; padding: 6px 12px; border-radius: 4px; cursor: pointer; }
-    
-    /* FIX VIDEO VIEW */
+
     #videoView { 
-        position: absolute; 
-        width: 400px; 
-        height: 300px; 
-        bottom: 10px; 
-        left: 10px; 
-        border: 1px solid #555; 
-        background: #000; 
-        z-index: 2500; 
-        overflow: hidden;
-        display: flex; 
-        align-items: center; 
-        justify-content: center;
-        box-shadow: 0 0 15px rgba(0,0,0,0.5);
+        position: absolute; width: 400px; height: 300px; bottom: 10px; left: 10px; 
+        border: 1px solid #555; background: #000; z-index: 2500; overflow: hidden;
+        display: flex; align-items: center; justify-content: center;
     }
-    #videoView video { 
-        max-width: none;
-        max-height: none;
-        display: block;
-        transform-origin: center center;
-        /* Loại bỏ position absolute để Flexbox của cha hoạt động */
-        position: relative; 
-    }
-    .resize-handle { 
-        position: absolute; width: 12px; height: 12px; background: #00aaff; z-index: 10;
-    }
+    #videoView video { max-width: none; max-height: none; position: relative; transform-origin: center center; }
+    .resize-handle { position: absolute; width: 12px; height: 12px; background: #00aaff; z-index: 10; }
     .resize-handle.top-left { top: 0; left: 0; cursor: nw-resize; }
     .resize-handle.top-right { top: 0; right: 0; cursor: ne-resize; }
     .resize-handle.bottom-left { bottom: 0; left: 0; cursor: sw-resize; }
@@ -69,10 +49,9 @@
   </style>
 </head>
 <body>
-  <!-- Nội dung body giữ nguyên như cũ -->
-  <button id="settingBtn">Settings</button>
+  <button id="settingBtn">⚙ Settings</button>
   <div id="instr">
-    [N] New Polygon | [Enter] Finish | [Del] Delete | [Right Click] Pan Video | [Scroll] Zoom
+    [N] New Polygon | [Enter] Finish | [Del] Delete | [Right Click Video] Pan | [Scroll Video] Zoom
   </div>
   <div id="layout">
     <div id="viewWrap">
@@ -80,7 +59,9 @@
     </div>
     <div id="sidebarRight">
       <h3>Data</h3>
+      <label>PCD / JSON Annotation</label>
       <input type="file" id="pcdFile" accept=".pcd,.json" />
+      <label>Video File</label>
       <input type="file" id="videoFile" accept="video/*" />
 
       <h3>Shader Settings</h3>
@@ -112,10 +93,10 @@
       </div>
 
       <div class="group">
-        <label>Filter Clipping</label>
+        <label>Filters</label>
         <select id="fType">
           <option value="none">None</option>
-          <option value="height">Height</option>
+          <option value="height">Height (Z)</option>
           <option value="distance">Distance</option>
         </select>
         <div id="filterOpts" style="display:none">
@@ -126,9 +107,9 @@
         </div>
       </div>
 
-      <label class="inline-check"><input type="checkbox" id="oxy"> Project Z=0</label>
-      <button id="apply" style="background:#007bff">APPLY</button>
-      <button id="export" style="background:#28a745">EXPORT</button>
+      <label class="inline-check"><input type="checkbox" id="oxy"> Flatten to Z=0</label>
+      <button id="apply" style="background:#007bff">APPLY ALL</button>
+      <button id="export" style="background:#28a745">EXPORT JSON</button>
     </div>
   </div>
 
@@ -163,28 +144,80 @@
       container.appendChild(renderer.domElement);
 
       const controls = new OrbitControls(camera, renderer.domElement);
-      controls.enableDamping = false;
+      controls.enableDamping = false; // Tắt dư âm
 
       const polyMgr = new PolygonManager(scene, renderer);
       const videoMgr = new VideoManager(document.body);
 
-      // (Các phần logic load file, apply shader giữ nguyên như ở câu trả lời trước...)
-      document.getElementById('videoFile').onchange = e => {
-        const file = e.target.files[0];
-        if (file) videoMgr.loadVideo(file);
+      let pcdMesh = null;
+      const state = {
+        pointSize: 1.5, colorMode: 'default', projectOXY: false, filterType: 'none',
+        fMin: -10, fMax: 10, hZMin: -2, hZMax: 5, hStart: new THREE.Color('#0000ff'),
+        hEnd: new THREE.Color('#ff0000'), hRepeat: 1, hMode: 'clamp',
+        dMin: 0, dMax: 20, dStart: new THREE.Color('#0000ff'), dEnd: new THREE.Color('#ff0000'), dRepeat: 1, dMode: 'clamp'
       };
+
+      const refresh = () => { if(pcdMesh) updatePCDShader(THREE, pcdMesh, state); };
+
+      document.getElementById('pcdFile').onchange = e => {
+        const file = e.target.files[0];
+        if(!file) return;
+        if(file.name.endsWith('.json')) {
+          const reader = new FileReader();
+          reader.onload = ev => polyMgr.loadFromAnnotations(JSON.parse(ev.target.result).annotations);
+          reader.readAsText(file);
+        } else {
+          new PCDLoader().load(URL.createObjectURL(file), points => {
+            if(pcdMesh) scene.remove(pcdMesh);
+            pcdMesh = points; scene.add(pcdMesh);
+            refresh();
+          });
+        }
+      };
+
+      document.getElementById('videoFile').onchange = e => { if(e.target.files[0]) videoMgr.loadVideo(e.target.files[0]); };
 
       document.getElementById('apply').onclick = () => {
-        // ... (Logic state)
-        polyMgr.setFlatten(document.getElementById('oxy').checked);
-        // refreshShader();
+        state.pointSize = parseFloat(document.getElementById('size').value);
+        state.colorMode = document.getElementById('colorMode').value;
+        state.projectOXY = document.getElementById('oxy').checked;
+        state.filterType = document.getElementById('fType').value;
+        state.fMin = parseFloat(document.getElementById('fMin').value);
+        state.fMax = parseFloat(document.getElementById('fMax').value);
+        state.hZMin = parseFloat(document.getElementById('min').value);
+        state.hZMax = parseFloat(document.getElementById('max').value);
+        state.hStart.set(document.getElementById('c1').value);
+        state.hEnd.set(document.getElementById('c2').value);
+        state.hRepeat = parseFloat(document.getElementById('rep').value);
+        state.hMode = document.getElementById('mode').value;
+        polyMgr.setFlatten(state.projectOXY);
+        refresh();
       };
 
-      function animate() {
-        requestAnimationFrame(animate);
-        controls.update();
-        renderer.render(scene, camera);
-      }
+      document.getElementById('colorMode').onchange = e => document.getElementById('gradOpts').style.display = (e.target.value === 'height' || e.target.value === 'distance') ? 'block' : 'none';
+      document.getElementById('fType').onchange = e => document.getElementById('filterOpts').style.display = (e.target.value !== 'none') ? 'block' : 'none';
+      document.getElementById('settingBtn').onclick = () => document.getElementById('sidebarRight').classList.toggle('open');
+      document.getElementById('export').onclick = () => {
+        const blob = new Blob([JSON.stringify(polyMgr.getAnnotations(), null, 2)], {type:'application/json'});
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'data.json'; a.click();
+      };
+
+      window.addEventListener('keydown', e => {
+        if(e.key.toLowerCase() === 'n') polyMgr.start();
+        if(e.key === 'Enter') polyMgr.finish();
+        if(e.key === 'Delete' || e.key === 'Backspace') polyMgr.deleteSelected();
+        if(e.key === 'c') polyMgr.cycleCategory(1);
+      });
+
+      renderer.domElement.addEventListener('mousedown', e => {
+        const hit = polyMgr.handlePointerDown(e, camera);
+        if(hit) controls.enabled = false;
+        else if(polyMgr.isDrawing) polyMgr.addPoint(e, camera);
+      });
+      window.addEventListener('mousemove', e => { if(polyMgr.draggedHandle) polyMgr.onDrag(e, camera); });
+      window.addEventListener('mouseup', () => { polyMgr.onDragEnd(); controls.enabled = true; });
+
+      function animate() { requestAnimationFrame(animate); controls.update(); renderer.render(scene, camera); }
       animate();
     });
   </script>
