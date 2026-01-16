@@ -19,6 +19,7 @@ export class VideoManager {
         const url = URL.createObjectURL(file);
         this.video.src = url;
         this.video.onloadeddata = () => {
+            this.fitVideoToFrame(); // Adjust video scaling and position on load
             this.video.play().catch(() => {});
             if (onLoaded) onLoaded();
             this.focusCb();
@@ -28,22 +29,32 @@ export class VideoManager {
     createView() {
         this.view = document.createElement('div');
         this.view.id = 'videoView';
+        this.view.style.position = 'relative';
 
         this.video = document.createElement('video');
         this.video.controls = true;
         this.video.style.transformOrigin = 'center center';
+        this.video.style.position = 'absolute'; // Ensure absolute positioning for better scaling and centering
         this.video.autoplay = false;
         this.view.appendChild(this.video);
 
-        const handle = document.createElement('div');
-        handle.className = 'resize-handle';
-        this.view.appendChild(handle);
+        const handles = this.createResizeHandles();
+        handles.forEach(handle => this.view.appendChild(handle));
 
         this.root.appendChild(this.view);
-        this.attachEvents(handle);
+        this.attachEvents(handles);
     }
 
-    attachEvents(handle) {
+    createResizeHandles() {
+        const directions = ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
+        return directions.map(dir => {
+            const handle = document.createElement('div');
+            handle.className = `resize-handle ${dir}`;
+            return handle;
+        });
+    }
+
+    attachEvents(handles) {
         this.view.addEventListener('click', (e) => { e.stopPropagation(); this.focusCb(); });
         this.view.addEventListener('contextmenu', e => e.preventDefault());
 
@@ -57,9 +68,10 @@ export class VideoManager {
 
         this.view.addEventListener('mousedown', e => {
             this.focusCb();
-            if (e.target === handle) {
+            if (e.target.matches('.resize-handle')) {
                 this.isResizing = true;
                 this.startSize = { w: this.view.offsetWidth, h: this.view.offsetHeight, x: e.clientX, y: e.clientY };
+                this.resizeDirection = Array.from(e.target.classList).find(c => c.includes('-')); // Determine direction
             } else if (e.button === 2) {
                 this.isPanning = true;
                 this.startPan = { x: e.clientX, y: e.clientY, ox: this.offset.x, oy: this.offset.y };
@@ -68,12 +80,7 @@ export class VideoManager {
 
         window.addEventListener('mousemove', e => {
             if (this.isResizing) {
-                const dx = e.clientX - this.startSize.x;
-                const dy = e.clientY - this.startSize.y;
-                const w = Math.max(200, this.startSize.w + dx);
-                const h = Math.max(150, this.startSize.h + dy);
-                this.view.style.width = w + 'px';
-                this.view.style.height = h + 'px';
+                this.resizeView(e);
             }
             if (this.isPanning) {
                 const dx = e.clientX - this.startPan.x;
@@ -90,8 +97,42 @@ export class VideoManager {
         });
     }
 
+    resizeView(e) {
+        const dx = e.clientX - this.startSize.x;
+        const dy = e.clientY - this.startSize.y;
+        let newWidth = this.startSize.w;
+        let newHeight = this.startSize.h;
+
+        if (this.resizeDirection.includes('right')) newWidth += dx;
+        if (this.resizeDirection.includes('bottom')) newHeight += dy;
+        if (this.resizeDirection.includes('left')) newWidth -= dx;
+        if (this.resizeDirection.includes('top')) newHeight -= dy;
+
+        this.view.style.width = Math.max(200, newWidth) + 'px';
+        this.view.style.height = Math.max(150, newHeight) + 'px';
+    }
+
     applyTransform() {
         if (!this.video) return;
         this.video.style.transform = `translate(${this.offset.x}px, ${this.offset.y}px) scale(${this.scale})`;
+    }
+
+    fitVideoToFrame() {
+        if (!this.video || !this.view) return;
+        const { clientWidth, clientHeight } = this.view;
+        const videoAspect = this.video.videoWidth / this.video.videoHeight;
+        const frameAspect = clientWidth / clientHeight;
+
+        if (videoAspect > frameAspect) {
+            this.scale = clientWidth / this.video.videoWidth;
+            this.offset.y = (clientHeight - this.video.videoHeight * this.scale) / 2;
+            this.offset.x = 0;
+        } else {
+            this.scale = clientHeight / this.video.videoHeight;
+            this.offset.x = (clientWidth - this.video.videoWidth * this.scale) / 2;
+            this.offset.y = 0;
+        }
+
+        this.applyTransform();
     }
 }
