@@ -1,86 +1,92 @@
-export class VideoManager {
-    constructor(root = document.body) {
-        this.root = root;
-        this.view = null;
-        this.video = null;
-        this.scale = 1;
-        this.offset = { x: 0, y: 0 };
-        this.isPanning = false;
-        this.isResizing = false;
-        this.startPan = { x: 0, y: 0, ox: 0, oy: 0 };
-        this.startSize = { w: 400, h: 300, x: 0, y: 0 };
-        this.resizeDirection = '';
+function getRepeatLogic(valueName, mode) {
+    switch (mode) {
+        case 'repeat': return `fract(${valueName})`;
+        case 'mirror': return `abs(mod(${valueName}, 2.0) - 1.0)`;
+        default: return `clamp(${valueName}, 0.0, 1.0)`;
+    }
+}
+
+export function buildDefaultColor() { return `gl_FragColor = vec4(vColor, 1.0);`; }
+
+export function buildBWColor() {
+    return `
+        float gray = dot(vColor.rgb, vec3(0.299, 0.587, 0.114));
+        gl_FragColor = vec4(vec3(gray), 1.0);
+    `;
+}
+
+export function buildHeightColor(minValue, maxValue, startColor, endColor, repeatCount, mode, posVar = 'vOriginal') {
+    const factor = `((${posVar}.z - ${minValue.toFixed(4)}) / (${maxValue.toFixed(4)} - ${minValue.toFixed(4)}) * ${repeatCount.toFixed(4)})`;
+    return `
+        float h = ${getRepeatLogic(factor, mode)};
+        vec3 colH = mix(vec3(${startColor.r.toFixed(4)}, ${startColor.g.toFixed(4)}, ${startColor.b.toFixed(4)}), 
+                        vec3(${endColor.r.toFixed(4)}, ${endColor.g.toFixed(4)}, ${endColor.b.toFixed(4)}), h);
+        gl_FragColor = vec4(colH, 1.0);
+    `;
+}
+
+export function buildDistanceColor(minValue, maxValue, startColor, endColor, repeatCount, mode, posVar = 'vOriginal') {
+    const factor = `((length(${posVar}.xy) - ${minValue.toFixed(4)}) / (${maxValue.toFixed(4)} - ${minValue.toFixed(4)}) * ${repeatCount.toFixed(4)})`;
+    return `
+        float d = ${getRepeatLogic(factor, mode)};
+        vec3 colD = mix(vec3(${startColor.r.toFixed(4)}, ${startColor.g.toFixed(4)}, ${startColor.b.toFixed(4)}), 
+                        vec3(${endColor.r.toFixed(4)}, ${endColor.g.toFixed(4)}, ${endColor.b.toFixed(4)}), d);
+        gl_FragColor = vec4(colD, 1.0);
+    `;
+}
+
+export function updatePCDShader(THREE, pcdMesh, state) {
+    if (!pcdMesh) return;
+    if (pcdMesh.material) pcdMesh.material.dispose();
+
+    const vertexShader = `
+        precision highp float;
+        varying vec3 vColor;
+        varying vec3 vPosition;   // flattened if projectOXY
+        varying vec3 vOriginal;   // original 3D position
+        uniform float uSize; 
+        void main() {
+            vColor = color;
+            vOriginal = position;
+            vec3 pos = position;
+            if (${state.projectOXY}) pos.z = 0.0;
+            vPosition = pos;
+            vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+            gl_Position = projectionMatrix * mvPosition;
+            gl_PointSize = uSize;
+        }
+    `;
+
+    let filterLogic = '';
+    if (state.filterType === 'height') {
+        filterLogic = `
+            if (vOriginal.z < ${state.fMin.toFixed(4)} || vOriginal.z > ${state.fMax.toFixed(4)}) discard;
+        `;
+    } else if (state.filterType === 'distance') {
+        filterLogic = `
+            float r = length(vOriginal.xy);
+            if (r < ${state.fMin.toFixed(4)} || r > ${state.fMax.toFixed(4)}) discard;
+        `;
     }
 
-    loadVideo(file) {
-        if (!this.view) this.createView();
-        this.video.src = URL.createObjectURL(file);
-        this.video.onloadedmetadata = () => { this.fitVideoToFrame(); this.video.play().catch(()=>{}); };
-    }
+    let colorLogic = buildDefaultColor();
+    if (state.colorMode === 'bw') colorLogic = buildBWColor();
+    if (state.colorMode === 'height') colorLogic = buildHeightColor(state.hZMin, state.hZMax, state.hStart, state.hEnd, state.hRepeat, state.hMode);
+    if (state.colorMode === 'distance') colorLogic = buildDistanceColor(state.dMin, state.dMax, state.dStart, state.dEnd, state.dRepeat, state.dMode);
 
-    createView() {
-        this.view = document.createElement('div');
-        this.view.id = 'videoView';
-        this.video = document.createElement('video');
-        this.video.controls = true;
-        this.video.style.position = 'relative';
-        this.view.appendChild(this.video);
-
-        ['top-left', 'top-right', 'bottom-left', 'bottom-right'].forEach(dir => {
-            const h = document.createElement('div');
-            h.className = `resize-handle ${dir}`;
-            this.view.appendChild(h);
-        });
-        this.root.appendChild(this.view);
-        this.attachEvents();
-    }
-
-    attachEvents() {
-        this.view.addEventListener('mousedown', e => {
-            if (e.target.classList.contains('resize-handle')) {
-                this.isResizing = true;
-                this.resizeDirection = e.target.classList[1];
-                this.startSize = { w: this.view.offsetWidth, h: this.view.offsetHeight, x: e.clientX, y: e.clientY };
-                e.preventDefault();
-            } else if (e.button === 2) { 
-                this.isPanning = true;
-                this.startPan = { x: e.clientX, y: e.clientY, ox: this.offset.x, oy: this.offset.y };
-                e.preventDefault();
-            }
-        });
-
-        this.view.addEventListener('wheel', e => {
-            e.preventDefault();
-            this.scale *= (e.deltaY < 0 ? 1.1 : 0.9);
-            this.applyTransform();
-        }, { passive: false });
-
-        window.addEventListener('mousemove', e => {
-            if (this.isResizing) {
-                const dx = e.clientX - this.startSize.x, dy = e.clientY - this.startSize.y;
-                if (this.resizeDirection.includes('right')) this.view.style.width = Math.max(150, this.startSize.w + dx) + 'px';
-                if (this.resizeDirection.includes('bottom')) this.view.style.height = Math.max(100, this.startSize.h + dy) + 'px';
-            }
-            if (this.isPanning) {
-                this.offset.x = this.startPan.ox + (e.clientX - this.startPan.x);
-                this.offset.y = this.startPan.oy + (e.clientY - this.startPan.y);
-                this.applyTransform();
-            }
-        });
-        window.addEventListener('mouseup', () => { this.isPanning = false; this.isResizing = false; });
-        this.view.addEventListener('contextmenu', e => e.preventDefault());
-    }
-
-    applyTransform() {
-        if (this.video) this.video.style.transform = `translate(${this.offset.x}px, ${this.offset.y}px) scale(${this.scale})`;
-    }
-
-    fitVideoToFrame() {
-        if (!this.video || !this.view) return;
-        const aspect = this.video.videoWidth / this.video.videoHeight;
-        const frameAspect = this.view.clientWidth / this.view.clientHeight;
-        this.scale = (aspect > frameAspect) ? (this.view.clientWidth / this.video.videoWidth) : (this.view.clientHeight / this.video.videoHeight);
-        this.offset = { x: 0, y: 0 };
-        this.applyTransform();
-    }
+    pcdMesh.material = new THREE.ShaderMaterial({
+        uniforms: { uSize: { value: state.pointSize } },
+        vertexShader,
+        fragmentShader: `
+            precision highp float;
+            varying vec3 vColor; 
+            varying vec3 vPosition; 
+            varying vec3 vOriginal; 
+            void main() { ${filterLogic} ${colorLogic} }
+        `,
+        vertexColors: true,
+        depthTest: true,
+        depthWrite: true,
+        transparent: false
+    });
 }
