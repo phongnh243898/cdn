@@ -23,7 +23,7 @@
     }
     #sidebarRight.open { transform: translateX(0); }
 
-    #sidebarRight h3 { color: #00aaff; border-bottom: 1px solid #333; font-size: 13px; margin-top: 15px; padding-bottom: 5px; }
+    #sidebarRight h3 { color: #00aaff; border-bottom: 1px solid #333; font-size: 13px; margin-top: 10px; padding-bottom: 6px; }
     #sidebarRight input, #sidebarRight select, #sidebarRight button { width: 100%; margin-bottom: 10px; padding: 5px; background: #222; color: #fff; border: 1px solid #444; font-size: 12px; }
     .group { border: 1px solid #333; padding: 10px; margin-bottom: 10px; border-radius: 4px; }
     .inline-check { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; margin-bottom: 10px; cursor: pointer; }
@@ -33,10 +33,12 @@
 
     #settingBtn { position: absolute; top: 10px; right: 10px; z-index: 3000; background: #444; color: #fff; border: 1px solid #666; padding: 6px 12px; border-radius: 4px; cursor: pointer; }
 
+    /* video view */
     #videoView { 
         position: absolute; width: 400px; height: 300px; bottom: 10px; left: 10px; 
         border: 1px solid #555; background: #000; z-index: 2500; overflow: hidden;
         display: flex; align-items: center; justify-content: center;
+        box-shadow: 0 0 12px rgba(0,0,0,0.35);
     }
     #videoView video { max-width: none; max-height: none; position: relative; transform-origin: center center; }
     .resize-handle { position: absolute; width: 12px; height: 12px; background: #00aaff; z-index: 10; }
@@ -51,7 +53,7 @@
 <body>
   <button id="settingBtn">⚙ Settings</button>
   <div id="instr">
-    [N] New Polygon | [Enter] Finish | [Del] Delete | [Right Click Video] Pan | [Scroll Video] Zoom
+    [N] New | [Enter] Finish | [Del] Delete | [C] Cycle Category | [Right click video] Pan | [Scroll video] Zoom
   </div>
   <div id="layout">
     <div id="viewWrap">
@@ -73,21 +75,23 @@
         <select id="colorMode">
           <option value="default">Default</option>
           <option value="bw">B&W</option>
-          <option value="height">Height</option>
-          <option value="distance">Distance</option>
+          <option value="height">Height Gradient</option>
+          <option value="distance">Distance Gradient</option>
         </select>
         <div id="gradOpts" style="display:none">
           <div class="row-2">
-            <input type="number" id="min" value="-2">
-            <input type="number" id="max" value="5">
+            <div><label>Min</label><input type="number" id="min" value="-2" step="0.1"></div>
+            <div><label>Max</label><input type="number" id="max" value="5" step="0.1"></div>
           </div>
           <div class="row-2">
-            <input type="color" id="c1" value="#0000ff">
-            <input type="color" id="c2" value="#ff0000">
+            <div><label>Start</label><input type="color" id="c1" value="#0000ff"></div>
+            <div><label>End</label><input type="color" id="c2" value="#ff0000"></div>
           </div>
           <div class="row-2">
-            <input type="number" id="rep" value="1" step="0.1">
-            <select id="mode"><option value="clamp">Clamp</option><option value="repeat">Repeat</option><option value="mirror">Mirror</option></select>
+            <div><label>Repeat</label><input type="number" id="rep" value="1" step="0.1"></div>
+            <div><label>Mode</label>
+              <select id="mode"><option value="clamp">Clamp</option><option value="repeat">Repeat</option><option value="mirror">Mirror</option></select>
+            </div>
           </div>
         </div>
       </div>
@@ -101,8 +105,8 @@
         </select>
         <div id="filterOpts" style="display:none">
           <div class="row-2">
-            <input type="number" id="fMin" value="-10">
-            <input type="number" id="fMax" value="10">
+            <div><label>F-Min</label><input type="number" id="fMin" value="-10"></div>
+            <div><label>F-Max</label><input type="number" id="fMax" value="10"></div>
           </div>
         </div>
       </div>
@@ -134,48 +138,69 @@
       const container = document.getElementById('render3d');
       const scene = new THREE.Scene();
       scene.background = new THREE.Color('#a2a2a2');
-      
+
       const camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 1000);
       camera.position.set(0, 0, 50);
       camera.up.set(0, 0, 1);
 
       const renderer = new THREE.WebGLRenderer({ antialias: true });
       renderer.setSize(container.clientWidth, container.clientHeight);
+      renderer.setPixelRatio(window.devicePixelRatio);
       container.appendChild(renderer.domElement);
 
       const controls = new OrbitControls(camera, renderer.domElement);
-      controls.enableDamping = false; // Tắt dư âm
+      controls.enableDamping = false; // yêu cầu: không dư âm
 
       const polyMgr = new PolygonManager(scene, renderer);
       const videoMgr = new VideoManager(document.body);
 
       let pcdMesh = null;
       const state = {
-        pointSize: 1.5, colorMode: 'default', projectOXY: false, filterType: 'none',
-        fMin: -10, fMax: 10, hZMin: -2, hZMax: 5, hStart: new THREE.Color('#0000ff'),
-        hEnd: new THREE.Color('#ff0000'), hRepeat: 1, hMode: 'clamp',
+        pointSize: 1.5, colorMode: 'default', projectOXY: false,
+        filterType: 'none', fMin: -10, fMax: 10,
+        hZMin: -2, hZMax: 5, hStart: new THREE.Color('#0000ff'), hEnd: new THREE.Color('#ff0000'), hRepeat: 1, hMode: 'clamp',
         dMin: 0, dMax: 20, dStart: new THREE.Color('#0000ff'), dEnd: new THREE.Color('#ff0000'), dRepeat: 1, dMode: 'clamp'
       };
 
-      const refresh = () => { if(pcdMesh) updatePCDShader(THREE, pcdMesh, state); };
+      const refreshShader = () => { if (pcdMesh) updatePCDShader(THREE, pcdMesh, state); };
+
+      // UI wiring
+      document.getElementById('settingBtn').onclick = () => document.getElementById('sidebarRight').classList.toggle('open');
+
+      document.getElementById('colorMode').onchange = e => {
+        document.getElementById('gradOpts').style.display = (e.target.value === 'height' || e.target.value === 'distance') ? 'block' : 'none';
+      };
+      document.getElementById('fType').onchange = e => {
+        document.getElementById('filterOpts').style.display = (e.target.value !== 'none') ? 'block' : 'none';
+      };
 
       document.getElementById('pcdFile').onchange = e => {
         const file = e.target.files[0];
-        if(!file) return;
-        if(file.name.endsWith('.json')) {
+        if (!file) return;
+        if (file.name.endsWith('.json')) {
           const reader = new FileReader();
-          reader.onload = ev => polyMgr.loadFromAnnotations(JSON.parse(ev.target.result).annotations);
+          reader.onload = ev => {
+            const data = JSON.parse(ev.target.result);
+            polyMgr.loadFromAnnotations(data.annotations || []);
+          };
           reader.readAsText(file);
         } else {
           new PCDLoader().load(URL.createObjectURL(file), points => {
-            if(pcdMesh) scene.remove(pcdMesh);
-            pcdMesh = points; scene.add(pcdMesh);
-            refresh();
+            if (pcdMesh) scene.remove(pcdMesh);
+            pcdMesh = points;
+            scene.add(pcdMesh);
+            points.geometry.computeBoundingSphere();
+            if (points.geometry.boundingSphere) {
+              const c = points.geometry.boundingSphere.center;
+              controls.target.copy(c);
+              camera.position.set(c.x, c.y, c.z + 50);
+            }
+            refreshShader();
           });
         }
       };
 
-      document.getElementById('videoFile').onchange = e => { if(e.target.files[0]) videoMgr.loadVideo(e.target.files[0]); };
+      document.getElementById('videoFile').onchange = e => { const f = e.target.files[0]; if (f) videoMgr.loadVideo(f); };
 
       document.getElementById('apply').onclick = () => {
         state.pointSize = parseFloat(document.getElementById('size').value);
@@ -184,41 +209,62 @@
         state.filterType = document.getElementById('fType').value;
         state.fMin = parseFloat(document.getElementById('fMin').value);
         state.fMax = parseFloat(document.getElementById('fMax').value);
-        state.hZMin = parseFloat(document.getElementById('min').value);
-        state.hZMax = parseFloat(document.getElementById('max').value);
-        state.hStart.set(document.getElementById('c1').value);
-        state.hEnd.set(document.getElementById('c2').value);
-        state.hRepeat = parseFloat(document.getElementById('rep').value);
-        state.hMode = document.getElementById('mode').value;
+
+        if (state.colorMode === 'height') {
+          state.hZMin = parseFloat(document.getElementById('min').value);
+          state.hZMax = parseFloat(document.getElementById('max').value);
+          state.hStart.set(document.getElementById('c1').value);
+          state.hEnd.set(document.getElementById('c2').value);
+          state.hRepeat = parseFloat(document.getElementById('rep').value);
+          state.hMode = document.getElementById('mode').value;
+        } else if (state.colorMode === 'distance') {
+          state.dMin = parseFloat(document.getElementById('min').value);
+          state.dMax = parseFloat(document.getElementById('max').value);
+          state.dStart.set(document.getElementById('c1').value);
+          state.dEnd.set(document.getElementById('c2').value);
+          state.dRepeat = parseFloat(document.getElementById('rep').value);
+          state.dMode = document.getElementById('mode').value;
+        }
         polyMgr.setFlatten(state.projectOXY);
-        refresh();
+        refreshShader();
       };
 
-      document.getElementById('colorMode').onchange = e => document.getElementById('gradOpts').style.display = (e.target.value === 'height' || e.target.value === 'distance') ? 'block' : 'none';
-      document.getElementById('fType').onchange = e => document.getElementById('filterOpts').style.display = (e.target.value !== 'none') ? 'block' : 'none';
-      document.getElementById('settingBtn').onclick = () => document.getElementById('sidebarRight').classList.toggle('open');
       document.getElementById('export').onclick = () => {
-        const blob = new Blob([JSON.stringify(polyMgr.getAnnotations(), null, 2)], {type:'application/json'});
-        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'data.json'; a.click();
+        const data = polyMgr.getAnnotations();
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob); a.download = 'annotations.json'; a.click();
       };
 
+      // Keyboard shortcuts
       window.addEventListener('keydown', e => {
-        if(e.key.toLowerCase() === 'n') polyMgr.start();
-        if(e.key === 'Enter') polyMgr.finish();
-        if(e.key === 'Delete' || e.key === 'Backspace') polyMgr.deleteSelected();
-        if(e.key === 'c') polyMgr.cycleCategory(1);
+        if (e.key.toLowerCase() === 'n') polyMgr.start();
+        if (e.key === 'Enter') polyMgr.finish();
+        if (e.key === 'Delete' || e.key === 'Backspace') polyMgr.deleteSelected();
+        if (e.key.toLowerCase() === 'c') polyMgr.cycleCategory(1);
       });
 
+      // Mouse for polygons
       renderer.domElement.addEventListener('mousedown', e => {
         const hit = polyMgr.handlePointerDown(e, camera);
-        if(hit) controls.enabled = false;
-        else if(polyMgr.isDrawing) polyMgr.addPoint(e, camera);
+        if (hit) {
+          controls.enabled = false;
+        } else if (polyMgr.isDrawing && e.button === 0) {
+          polyMgr.addPoint(e, camera);
+        }
       });
-      window.addEventListener('mousemove', e => { if(polyMgr.draggedHandle) polyMgr.onDrag(e, camera); });
+      window.addEventListener('mousemove', e => { if (polyMgr.draggedHandle) polyMgr.onDrag(e, camera); });
       window.addEventListener('mouseup', () => { polyMgr.onDragEnd(); controls.enabled = true; });
 
-      function animate() { requestAnimationFrame(animate); controls.update(); renderer.render(scene, camera); }
-      animate();
+      // Resize
+      window.addEventListener('resize', () => {
+        camera.aspect = container.clientWidth / container.clientHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(container.clientWidth, container.clientHeight);
+      });
+
+      // Loop
+      (function animate() { requestAnimationFrame(animate); controls.update(); renderer.render(scene, camera); })();
     });
   </script>
 </body>
